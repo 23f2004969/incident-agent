@@ -1,4 +1,4 @@
-import hashlib, json, os, re, secrets, sqlite3, threading, time, uuid
+import asyncio, hashlib, json, os, re, secrets, sqlite3, threading, time, uuid
 from typing import Any
 import httpx
 from fastapi import FastAPI, Request
@@ -466,6 +466,12 @@ async def create(req: Request):
             or not isinstance(body.get("toolCatalog"), list) or not isinstance(inc.get("allowedRootCauses"), list) \
             or not isinstance(body.get("publicMarker", ""), str):
         return err(422, "invalid request")
+    hdrs = {"traceparent": req.headers.get("traceparent"), "tracestate": req.headers.get("tracestate")}
+    return await asyncio.to_thread(do_create, body, hdrs)
+
+
+def do_create(body, hdrs):
+    rid = body["runId"]
     h = sha(body)
     with run_lock(rid):
         st = load(rid)
@@ -473,12 +479,12 @@ async def create(req: Request):
             if st["reqHash"] != h:
                 return err(409, "conflict")
             return respond(st, st["firstResponse"])
-        hdr_tp = parse_tp(req.headers.get("traceparent"))
+        hdr_tp = parse_tp(hdrs.get("traceparent"))
         body_tp = parse_tp(body.get("traceparent")) or parse_tp((body.get("traceContext") or {}).get("traceparent") if isinstance(body.get("traceContext"), dict) else None)
         tp = hdr_tp or body_tp
         ts = None
         if tp:
-            ts = req.headers.get("tracestate") if hdr_tp else (body.get("tracestate") or (body.get("traceContext") or {}).get("tracestate") if isinstance(body.get("traceContext"), dict) else body.get("tracestate"))
+            ts = hdrs.get("tracestate") if hdr_tp else (body.get("tracestate") or (body.get("traceContext") or {}).get("tracestate") if isinstance(body.get("traceContext"), dict) else body.get("tracestate"))
         t0 = now_ns()
         st = {"runId": rid, "reqHash": h, "publicMarker": body.get("publicMarker", ""), "agentName": body.get("agentName") or "incident-response",
               "policy": body.get("policy") or {}, "_sens": sensitive_values(body),
@@ -512,6 +518,10 @@ async def receipts(rid: str, req: Request):
         return err(400, "invalid json")
     if not isinstance(body, dict) or not isinstance(body.get("receiptId"), str) or not body["receiptId"]:
         return err(422, "invalid receipt")
+    return await asyncio.to_thread(do_receipt, rid, body)
+
+
+def do_receipt(rid, body):
     with run_lock(rid):
         st = load(rid)
         if not st:
