@@ -99,9 +99,10 @@ def respond(st, obj, code=200):
 def evidence_ids(transcript):
     ids = []
     for line in transcript.splitlines():
-        m = re.match(r"\s*\[([^\]\s]+)\]", line)
-        if m and m.group(1) not in ids:
-            ids.append(m.group(1))
+        for m in re.finditer(r"\[([A-Za-z]+[_-][A-Za-z0-9_.:-]+)\]", line):
+            if m.group(1) not in ids:
+                ids.append(m.group(1))
+            break
     return ids
 
 
@@ -472,6 +473,13 @@ async def create(req: Request):
 
 def do_create(body, hdrs):
     rid = body["runId"]
+    try:
+        dbg = {k: v for k, v in body.items() if k not in ("sensitive", "incident")}
+        inc = dict(body["incident"]); inc["transcript"] = inc["transcript"][:1200] + " ...(" + str(len(body["incident"]["transcript"])) + " chars)"
+        dbg["incident"] = inc; dbg["hdrs"] = hdrs
+        print("REQ", json.dumps(dbg)[:6000], flush=True)
+    except Exception as e:
+        print("dbg err", e)
     h = sha(body)
     with run_lock(rid):
         st = load(rid)
@@ -507,6 +515,7 @@ def do_create(body, hdrs):
         resp = view(st)
         st["firstResponse"] = scrub(resp, st["_sens"])
         save(st)
+        print("RESP", json.dumps(st["firstResponse"])[:3000], flush=True)
         return respond(st, resp)
 
 
@@ -522,6 +531,7 @@ async def receipts(rid: str, req: Request):
 
 
 def do_receipt(rid, body):
+    print("RCPT", rid, json.dumps(body)[:1500], flush=True)
     with run_lock(rid):
         st = load(rid)
         if not st:
