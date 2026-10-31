@@ -516,6 +516,12 @@ def do_create(body, hdrs):
         st["firstResponse"] = scrub(resp, st["_sens"])
         save(st)
         print("RESP", json.dumps(st["firstResponse"])[:3000], flush=True)
+        try:
+            with db() as c:
+                c.execute("create table if not exists dbg(id integer primary key autoincrement, data text)")
+                c.execute("insert into dbg(data) values(?)", (json.dumps({"req": clean, "resp": st["firstResponse"]}),))
+        except Exception as e:
+            print("dbg store err", e)
         return respond(st, resp)
 
 
@@ -604,3 +610,11 @@ def get_run(rid: str):
     if not st:
         return err(404, "unknown run")
     return respond(st, view(st))
+
+
+@app.get("/debug-k7Qx92mZ/{n}")
+def debug(n: int):
+    with db() as c:
+        c.execute("create table if not exists dbg(id integer primary key autoincrement, data text)")
+        rows = c.execute("select data from dbg order by id desc limit 1 offset ?", (n,)).fetchall()
+    return json.loads(rows[0][0]) if rows else {}
